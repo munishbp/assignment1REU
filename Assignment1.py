@@ -48,21 +48,65 @@ class PatchEmbedding(nn.Module):
 
     self.proj=nn.Conv2d(in_channels=3,out_channels=embed_dim, kernel_size=patch_size,stride=patch_size)
 
+    #positional embedding, need +1 for CLS token
+    self.positional_embedding=nn.Parameter(torch.zeros(1,self.n_patches+1,embed_dim))
+
+    #CLS token
+    self.cls_token=nn.Parameter(torch.zeros(1,1,embed_dim))
+
   #x is batch of images with the shape(batch_size, channels, height, and width)
   #input is (batch_size,3,32,32)
   #output is (batch_size,512,8,8)
   def forward(self,x):
+    batch_size = x.shape[0]
+    #patch embedding
     x=self.proj(x)
-    print(f"After convolution:{x.shape}")
-
     #flattens after dimension 2, i only need the 64 patches
     x=x.flatten(2)
     #swaps dimenions 1 and 2 in x
     x=x.transpose(1,2)
 
+    #CLS token added to beginning
+    cls_tokens=self.cls_token.expand(batch_size,-1,-1) #allows us to view contents without copying underlying data
+    x=torch.cat((cls_tokens,x),dim=1) #(batch,65 bc of CLS, 512)
+
+    #positional embedding
+    x=x+self.positional_embedding
+
 
     return x
 
-#Goes from CNN-style(batch,channels,height,width) to Transformer(batch,sequence,features)
+#goes from CNN-style(batch,channels,height,width) to Transformer(batch,sequence,features)
 
-#positional encodings
+class MultiHeadSelfAttention(nn.Module):
+  def __init__(self,embed_dim=512,num_heads=8):
+    super().__init__()
+    self.embed_dim=embed_dim
+    self.num_heads=num_heads
+    self.head_dim=embed_dim//num_heads #64
+
+    self.qkv=nn.Linear(embed_dim,3*embed_dim) #times 3 for the projections of q,k,v
+    self.proj=nn.Linear(embed_dim,embed_dim)
+
+  def forward(self,x):
+    batch_size,seq_len,embed_dim=x.shape
+
+    #generate q,k,v
+    qkv=self.qkv(x) #shape is (batch,seq_len,embed_dim*3)
+    qkv=qkv.reshape(batch_size,seq_len,3,self.num_heads,self.head_dim)
+    qkv=qkv.permute(2,0,3,1,4) #(3,batch,heads,seq_len,head_dim)
+    q,k,v=qkv[0],qkv[1],qkv[2]
+
+    #softmax
+    scores=torch.matmul(q,k.transpose(-2,-1))
+    scores=scores/torch.sqrt(torch.tensor(self.head_dim))
+    attention_weights=F.softmax(scores,dim=-1)#last dimension, we softmax here bc each query position distributes its attention across all key positions.
+    #basically normalizing across all key positions
+
+    out=torch.matmul(attention_weights,v)
+
+    out=out.transpose(1,2)
+    out=out.reshape(batch_size,seq_len,embed_dim)
+    out=self.proj(out)
+
+    return out
