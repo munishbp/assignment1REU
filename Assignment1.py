@@ -110,3 +110,41 @@ class MultiHeadSelfAttention(nn.Module):
     out=self.proj(out)
 
     return out
+
+class TransformerEncoder(nn.Module):
+  def __init__(self, embed_dim=512, num_heads=8, mlp_ratio=4, dropout=0.1):
+    super().__init__()
+
+    #self attention
+    self.mhsa=MultiHeadSelfAttention(embed_dim,num_heads)
+
+    #layer1 normalization
+    self.norm1=nn.LayerNorm(embed_dim)
+    #layer2 normalization
+    self.norm2=nn.LayerNorm(embed_dim)
+
+    #feedforward component-MLP
+    mlp_dim=int(embed_dim*mlp_ratio)  #512x4=2048
+    self.mlp=nn.Sequential(nn.Linear(embed_dim,mlp_dim),nn.GELU(),nn.Linear(mlp_dim,embed_dim))#project up, activation function, project down
+
+
+    #dropout for regularization
+    self.dropout=nn.Dropout(dropout)
+
+    #takes output from self attention and turns into final output for model. implementation is through MLP
+    #learns the nonlinear relationships, parallelizable bc computations can be performed independently from others in the layer
+    #feed forward can be employed in a CNN
+
+  def forward(self,x):
+    #attention block with residual connection
+
+
+    #step 1: attention with residual
+    attention_out=self.mhsa(self.norm1(x))
+    x=x+self.dropout(attention_out)
+
+
+    #step 2: MLP with residual
+    mlp_out=self.mlp(self.norm2(x))
+    x=x+self.dropout(mlp_out)
+    return x
